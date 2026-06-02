@@ -1,0 +1,27 @@
+{
+  "name": "doc-mcp-desktop",
+  "version": "0.1.0",
+  "description": "한글/엑셀/워드 문서를 MCP로 질의·편집하는 개인용 데스크탑 앱 (claude CLI 헤드리스 구동)",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis"
+  },
+  "author": "metacoding",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.metacoding.docmcpdesktop",
+    "productName": "Doc MCP Desktop",
+    "files": [
+      "src/**/*",
+      "mcp.json"
+    ],
+    "win": {
+      "target": "nsis"
+    }
+  }
+}

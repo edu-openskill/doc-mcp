@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "hwp-mcp": {
+      "command": "npx",
+      "args": ["-y", "hwp-mcp"]
+    },
+    "excel": {
+      "command": "npx",
+      "args": ["-y", "@negokaz/excel-mcp-server"]
+    },
+    "docx": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol-server/word"]
+    }
+  }
+}

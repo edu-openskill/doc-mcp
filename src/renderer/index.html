@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    />
+    <title>Doc MCP Desktop</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">📄 Doc MCP Desktop</div>
+      <div class="controls">
+        <button id="btn-dir" class="btn">📁 문서 폴더</button>
+        <span id="dir-label" class="dir-label" title="">—</span>
+        <button id="btn-reset" class="btn ghost">↺ 새 대화</button>
+      </div>
+    </header>
+
+    <div id="status" class="status"></div>
+
+    <main id="messages" class="messages">
+      <div class="hint">
+        한글(.hwpx) · 엑셀(.xlsx) · 워드(.docx) 문서가 든 폴더를 선택하고,
+        무엇을 할지 적어보세요.<br />
+        예: <code>매출.xlsx 1분기 합계를 B10에 넣어줘</code> ·
+        <code>보고서.hwpx 요약해줘</code>
+      </div>
+    </main>
+
+    <footer class="composer">
+      <textarea
+        id="input"
+        rows="2"
+        placeholder="메시지를 입력하세요 (Enter 전송 / Shift+Enter 줄바꿈)"
+      ></textarea>
+      <button id="btn-send" class="btn primary">전송</button>
+    </footer>
+
+    <script src="renderer.js"></script>
+  </body>
+</html>
