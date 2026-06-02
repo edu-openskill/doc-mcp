@@ -3,13 +3,31 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const os = require('os');
+const fs = require('fs');
 const { ClaudeRunner } = require('./claude-runner');
+const { HwpxServer } = require('./hwpx-server');
 
 let mainWindow = null;
 let runner = null;
 let docDir = os.homedir();
+let hwpxServer = null;
 
-const MCP_CONFIG_PATH = path.join(__dirname, '..', '..', 'mcp.json');
+const APP_ROOT = path.join(__dirname, '..', '..');
+const SYSTEM_PROMPT_PATH = path.join(APP_ROOT, 'system-prompt.md');
+// 런타임 MCP 설정(한컴은 HTTP, 엑셀/워드는 stdio)을 생성해 둘 경로
+const RUNTIME_MCP_PATH = path.join(app.getPath('userData'), 'mcp.runtime.json');
+
+function writeRuntimeMcpConfig(hwpUrl) {
+  const cfg = {
+    mcpServers: {
+      hwp: { type: 'http', url: hwpUrl },
+      excel: { command: 'npx', args: ['-y', '@negokaz/excel-mcp-server'] },
+      docx: { command: 'npx', args: ['-y', '@modelcontextprotocol-server/word'] },
+    },
+  };
+  fs.writeFileSync(RUNTIME_MCP_PATH, JSON.stringify(cfg, null, 2), 'utf8');
+  return RUNTIME_MCP_PATH;
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -34,8 +52,9 @@ function emit(channel, payload) {
 
 function ensureRunner() {
   if (runner) return runner;
+  const mcpConfig = writeRuntimeMcpConfig(hwpxServer ? hwpxServer.url : 'http://127.0.0.1:8765/mcp');
   runner = new ClaudeRunner(
-    { cwd: docDir, mcpConfig: MCP_CONFIG_PATH },
+    { cwd: docDir, mcpConfig, systemPromptFile: SYSTEM_PROMPT_PATH },
     {
       onSystem: (evt) => emit('claude:system', evt),
       onText: (text) => emit('claude:text', text),
@@ -51,8 +70,16 @@ function ensureRunner() {
   return runner;
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   createWindow();
+
+  // 한컴 COM HWPX 서버 기동(HTTP). 파이프 없이 띄워야 COM이 동작한다.
+  hwpxServer = new HwpxServer(8765);
+  hwpxServer.start((msg) => emit('claude:system', { subtype: 'status', text: msg }))
+    .then((ok) => emit('claude:system', {
+      subtype: 'status',
+      text: ok ? 'hwpx COM 서버 준비됨' : 'hwpx COM 서버 시작 실패(한컴/파이썬 확인)',
+    }));
 
   // 환경 점검
   ipcMain.handle('env:check', () => {
@@ -84,6 +111,12 @@ app.whenReady().then(() => {
     return true;
   });
 
+  // 진행 중인 생성 중단 (세션은 유지)
+  ipcMain.handle('chat:stop', () => {
+    if (runner) return runner.interrupt();
+    return false;
+  });
+
   // 세션 초기화
   ipcMain.handle('chat:reset', () => {
     if (runner) {
@@ -100,5 +133,10 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (runner) runner.stop();
+  if (hwpxServer) hwpxServer.stop();
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('before-quit', () => {
+  if (hwpxServer) hwpxServer.stop();
 });

@@ -77,6 +77,11 @@ body {
   border-color: var(--accent);
 }
 
+.btn.primary.stop {
+  background: #c0392b;
+  border-color: #c0392b;
+}
+
 .btn.ghost {
   background: transparent;
 }

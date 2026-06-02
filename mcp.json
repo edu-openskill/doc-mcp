@@ -1,8 +1,9 @@
 {
+  "_comment": "참고용 템플릿. 실제 설정은 앱 실행 시 userData/mcp.runtime.json 으로 자동 생성됩니다. hwp 는 반드시 HTTP 전송이어야 합니다(stdio 파이프에서 한컴 COM open()이 멈춤). hwpx-com 서버는 앱이 파이프 없이 별도로 띄웁니다.",
   "mcpServers": {
-    "hwp-mcp": {
-      "command": "npx",
-      "args": ["-y", "hwp-mcp"]
+    "hwp": {
+      "type": "http",
+      "url": "http://127.0.0.1:8765/mcp"
     },
     "excel": {
       "command": "npx",

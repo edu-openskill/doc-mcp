@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('api', {
   checkEnv: () => ipcRenderer.invoke('env:check'),
   chooseDir: () => ipcRenderer.invoke('dir:choose'),
   send: (text) => ipcRenderer.invoke('chat:send', text),
+  stop: () => ipcRenderer.invoke('chat:stop'),
   reset: () => ipcRenderer.invoke('chat:reset'),
 
   // 스트리밍 이벤트 구독

@@ -28,6 +28,7 @@ class ClaudeRunner {
     this.proc = null;
     this.buffer = '';
     this.sessionId = null;
+    this._reqSeq = 0;
   }
 
   /** claude 실행 파일 경로를 찾는다(Windows에서는 .cmd/.ps1 래퍼). */
@@ -72,7 +73,7 @@ class ClaudeRunner {
 
     const allow =
       this.opts.allowedTools ||
-      'mcp__hwp-mcp__*,mcp__excel__*,mcp__docx__*,Read,Glob,Grep';
+      'mcp__hwp__*,mcp__excel__*,mcp__docx__*,Read,Glob,Grep';
 
     const args = [
       '-p',
@@ -84,6 +85,9 @@ class ClaudeRunner {
       '--permission-mode', 'acceptEdits',
       '--allowedTools', allow,
     ];
+    if (this.opts.systemPromptFile) {
+      args.push('--append-system-prompt-file', this.opts.systemPromptFile);
+    }
 
     this.proc = spawn(env.command, args, {
       cwd: this.opts.cwd || os.homedir(),
@@ -135,6 +139,31 @@ class ClaudeRunner {
     this.proc.stdin.write(JSON.stringify(msg) + '\n');
   }
 
+  /**
+   * 현재 진행 중인 생성(턴)만 중단한다. 세션 프로세스는 살려두어
+   * 곧바로 다음 메시지를 보낼 수 있다. (control_request:interrupt)
+   * @returns {boolean} 인터럽트 요청을 보냈으면 true
+   */
+  interrupt() {
+    if (!this.proc) return false;
+    const reqId = `int_${++this._reqSeq}`;
+    try {
+      this.proc.stdin.write(
+        JSON.stringify({
+          type: 'control_request',
+          request_id: reqId,
+          request: { subtype: 'interrupt' },
+        }) + '\n'
+      );
+      return true;
+    } catch (_) {
+      // stdin 이 닫혔으면 프로세스를 강제 종료한다(최후 수단).
+      this.stop();
+      return false;
+    }
+  }
+
+  /** 세션 자체를 완전히 종료한다(프로세스 kill). */
   stop() {
     if (this.proc) {
       try {

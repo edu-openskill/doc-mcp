@@ -8,11 +8,24 @@ const dirLabel = $('dir-label');
 
 let currentAssistant = null; // 스트리밍 중인 assistant 말풍선
 let busy = false;
+const sendBtn = $('btn-send');
 
 function setStatus(text, isError) {
   statusEl.textContent = text || '';
   statusEl.classList.toggle('show', !!text);
   statusEl.classList.toggle('error', !!isError);
+}
+
+/** 생성 중에는 전송 버튼을 '중지'로 바꾼다. */
+function setBusy(state) {
+  busy = state;
+  if (state) {
+    sendBtn.textContent = '■ 중지';
+    sendBtn.classList.add('stop');
+  } else {
+    sendBtn.textContent = '전송';
+    sendBtn.classList.remove('stop');
+  }
 }
 
 function clearHint() {
@@ -50,19 +63,47 @@ async function send() {
   if (!text || busy) return;
   inputEl.value = '';
   addMessage('user', text);
-  busy = true;
-  setStatus('생각 중…');
+  setBusy(true);
+  setStatus('생각 중… (중지하려면 ■ 중지 또는 Esc)');
   finishAssistant();
   await window.api.send(text);
 }
 
+// ── 중지 (진행 중 생성만 중단, 세션은 유지) ─────────────
+async function stop() {
+  if (!busy) return;
+  setStatus('중지하는 중…');
+  await window.api.stop();
+  // result(error_during_execution) 이벤트가 와서 setBusy(false) 처리됨.
+  // 혹시 이벤트가 늦거나 누락돼도 UI가 멈추지 않도록 안전망:
+  setTimeout(() => {
+    if (busy) {
+      finishAssistant();
+      setBusy(false);
+      setStatus('중지됨');
+    }
+  }, 1500);
+}
+
 // ── 이벤트 바인딩 ───────────────────────────────────────
-$('btn-send').addEventListener('click', send);
+// 전송 버튼은 생성 중에는 '중지'로 동작한다.
+sendBtn.addEventListener('click', () => (busy ? stop() : send()));
 
 inputEl.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     send();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    stop();
+  }
+});
+
+// 입력창 밖에서도 Esc 로 중지
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && busy) {
+    e.preventDefault();
+    stop();
   }
 });
 
@@ -80,7 +121,7 @@ $('btn-reset').addEventListener('click', async () => {
   finishAssistant();
   messagesEl.innerHTML = '';
   addMessage('assistant', '새 대화를 시작합니다.');
-  busy = false;
+  setBusy(false);
   setStatus('');
 });
 
@@ -98,10 +139,10 @@ window.api.onTool((tool) => {
   addMessage('tool', label + detail);
 });
 
-window.api.onResult(() => {
+window.api.onResult((evt) => {
   finishAssistant();
-  busy = false;
-  setStatus('');
+  setBusy(false);
+  setStatus(evt && evt.subtype === 'error_during_execution' ? '중지됨' : '');
 });
 
 window.api.onSystem((evt) => {
@@ -114,14 +155,14 @@ window.api.onSystem((evt) => {
 
 window.api.onError((msg) => {
   finishAssistant();
-  busy = false;
+  setBusy(false);
   addMessage('error', '⚠ ' + msg);
   setStatus('오류', true);
 });
 
 window.api.onExit((code) => {
   finishAssistant();
-  busy = false;
+  setBusy(false);
   if (code && code !== 0) {
     setStatus('claude 프로세스 종료 (code ' + code + ')', true);
   }
