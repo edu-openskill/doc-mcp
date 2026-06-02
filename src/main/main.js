@@ -5,176 +5,143 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const { execFile } = require('child_process');
-const { ClaudeRunner } = require('./claude-runner');
+const { AgentRunner } = require('./agent-runner');
+const providers = require('./providers');
 const { HwpxServer } = require('./hwpx-server');
 
 let mainWindow = null;
 let runner = null;
-let docDir = os.homedir();
 let hwpxServer = null;
 
-const APP_ROOT = path.join(__dirname, '..', '..');
-const PLAN_PROMPT_PATH = path.join(APP_ROOT, 'system-prompt-plan.md');
-const EXEC_PROMPT_PATH = path.join(APP_ROOT, 'system-prompt-execute.md');
-const DB_SERVER_PATH = path.join(APP_ROOT, 'mcp-servers', 'sqlite_db', 'sqlite_mcp_server.py');
-const DB_READ_PATH = path.join(APP_ROOT, 'mcp-servers', 'sqlite_db', 'db_read.py');
-// 통합 DB 파일 (MCP 서버 쓰기 / 앱이 직접 읽기). WAL 로 동시접근.
-const DB_PATH = path.join(app.getPath('userData'), 'data.db');
-// 런타임 MCP 설정(한컴=HTTP, 엑셀/워드=stdio, db=stdio)
-const RUNTIME_MCP_PATH = path.join(app.getPath('userData'), 'mcp.runtime.json');
+let docDir = os.homedir();
+let providerId = 'claude';
+let model = null;
+let mode = 'auto'; // auto | plan | edit
 
-function writeRuntimeMcpConfig(hwpUrl) {
-  const cfg = {
-    mcpServers: {
-      hwp: { type: 'http', url: hwpUrl },
-      excel: { command: 'npx', args: ['-y', '@negokaz/excel-mcp-server'] },
-      docx: { command: 'npx', args: ['-y', '@modelcontextprotocol-server/word'] },
-      db: {
-        command: 'python',
-        args: ['-u', DB_SERVER_PATH],
-        env: { DOC_MCP_DB_PATH: DB_PATH },
-      },
-    },
+const APP_ROOT = path.join(__dirname, '..', '..');
+const AUTO_PROMPT = path.join(APP_ROOT, 'system-prompt-auto.md');
+const PLAN_PROMPT = path.join(APP_ROOT, 'system-prompt-plan.md');
+const EXEC_PROMPT = path.join(APP_ROOT, 'system-prompt-execute.md');
+const DB_SERVER = path.join(APP_ROOT, 'mcp-servers', 'sqlite_db', 'sqlite_mcp_server.py');
+const DB_READ = path.join(APP_ROOT, 'mcp-servers', 'sqlite_db', 'db_read.py');
+const DB_PATH = path.join(app.getPath('userData'), 'data.db');
+const RUNTIME_MCP = path.join(app.getPath('userData'), 'mcp.runtime.json');
+
+function mcpServers() {
+  const hwpUrl = hwpxServer ? hwpxServer.url : 'http://127.0.0.1:8765/mcp';
+  return {
+    hwp: { type: 'http', url: hwpUrl },
+    excel: { command: 'npx', args: ['-y', '@negokaz/excel-mcp-server'] },
+    docx: { command: 'npx', args: ['-y', '@modelcontextprotocol-server/word'] },
+    db: { command: 'python', args: ['-u', DB_SERVER], env: { DOC_MCP_DB_PATH: DB_PATH } },
   };
-  fs.writeFileSync(RUNTIME_MCP_PATH, JSON.stringify(cfg, null, 2), 'utf8');
-  return RUNTIME_MCP_PATH;
+}
+
+function writeMcpConfig() {
+  const cfg = { mcpServers: mcpServers() };
+  fs.writeFileSync(RUNTIME_MCP, JSON.stringify(cfg, null, 2), 'utf8');
+  return RUNTIME_MCP;
+}
+
+/** 로그인 사전점검(휴리스틱): 자격증명 파일/환경변수 존재 여부 */
+function loginState(id) {
+  const home = os.homedir();
+  const exists = (p) => { try { return fs.existsSync(p); } catch (_) { return false; } };
+  if (id === 'claude')
+    return exists(path.join(home, '.claude', '.credentials.json')) || exists(path.join(home, '.claude.json')) || !!process.env.ANTHROPIC_API_KEY;
+  if (id === 'gemini')
+    return exists(path.join(home, '.gemini', 'oauth_creds.json')) || exists(path.join(home, '.gemini', 'google_accounts.json')) || !!process.env.GEMINI_API_KEY;
+  if (id === 'codex')
+    return exists(path.join(home, '.codex', 'auth.json')) || !!process.env.OPENAI_API_KEY;
+  return false;
+}
+
+function emit(channel, payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
 }
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1000,
-    height: 760,
-    title: 'Doc MCP Desktop',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
+    width: 1080, height: 760, minWidth: 720, title: 'Doc MCP',
+    backgroundColor: '#faf9f5',
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });
   mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
 }
 
-/** 렌더러로 이벤트를 보낸다. */
-function emit(channel, payload) {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send(channel, payload);
-  }
-}
-
 function ensureRunner() {
   if (runner) return runner;
-  const mcpConfig = writeRuntimeMcpConfig(hwpxServer ? hwpxServer.url : 'http://127.0.0.1:8765/mcp');
-  runner = new ClaudeRunner(
+  runner = new AgentRunner(
     {
-      cwd: docDir,
-      mcpConfig,
-      planPromptFile: PLAN_PROMPT_PATH,
-      execPromptFile: EXEC_PROMPT_PATH,
+      cwd: docDir, mcpConfig: writeMcpConfig(),
+      providerId, model, mode,
+      autoPromptFile: AUTO_PROMPT, planPromptFile: PLAN_PROMPT, execPromptFile: EXEC_PROMPT,
     },
     {
-      onSystem: (evt) => emit('claude:system', evt),
-      onText: (text) => emit('claude:text', text),
-      onTool: (tool) => emit('claude:tool', tool),
-      onResult: (evt) => emit('claude:result', evt),
-      onError: (msg) => emit('claude:error', msg),
-      onExit: (code) => {
-        emit('claude:exit', code);
-        runner = null;
-      },
+      onSystem: (s) => emit('agent:system', s),
+      onText: (t) => emit('agent:text', t),
+      onTool: (t) => emit('agent:tool', t),
+      onResult: (r) => emit('agent:result', r),
+      onError: (m) => emit('agent:error', m),
+      onExit: (p) => emit('agent:exit', p),
     }
   );
   return runner;
 }
 
-app.whenReady().then(async () => {
+app.whenReady().then(() => {
   createWindow();
 
-  // 한컴 COM HWPX 서버 기동(HTTP). 파이프 없이 띄워야 COM이 동작한다.
   hwpxServer = new HwpxServer(8765);
-  hwpxServer.start((msg) => emit('claude:system', { subtype: 'status', text: msg }))
-    .then((ok) => emit('claude:system', {
-      subtype: 'status',
-      text: ok ? 'hwpx COM 서버 준비됨' : 'hwpx COM 서버 시작 실패(한컴/파이썬 확인)',
-    }));
+  hwpxServer.start((msg) => emit('agent:system', { status: msg }))
+    .then((ok) => emit('agent:system', { status: ok ? 'hwp COM 서버 준비됨' : 'hwp COM 서버 시작 실패(한컴/파이썬 확인)' }));
 
-  // 환경 점검
-  ipcMain.handle('env:check', () => {
-    const env = ClaudeRunner.checkEnvironment();
-    return { ...env, docDir };
+  // 제공자 목록 + 설치/로그인 상태
+  ipcMain.handle('providers:list', () => providers.list().map((p) => {
+    const det = providers.get(p.id).detect();
+    return { ...p, installed: det.installed, version: det.version || '', loggedIn: det.installed && loginState(p.id) };
+  }));
+
+  ipcMain.handle('provider:set', (_e, id, m) => {
+    providerId = id; model = m || null;
+    if (runner) { runner.setProvider(id); runner.setModel(model); }
+    // gemini 는 MCP 를 사전 등록
+    if (id === 'gemini') { try { providers.get('gemini').ensureMcp(mcpServers()); } catch (_) {} }
+    return { installed: providers.get(id).detect().installed, loggedIn: loginState(id) };
   });
+  ipcMain.handle('model:set', (_e, m) => { model = m; if (runner) runner.setModel(m); return true; });
+  ipcMain.handle('mode:set', (_e, m) => { mode = m; if (runner) runner.setMode(m); return true; });
 
-  // 대시보드: data.db 를 파이썬 헬퍼로 읽어 JSON 반환(읽기 전용)
-  const runDbRead = (args) =>
-    new Promise((resolve) => {
-      execFile(
-        'python',
-        ['-u', DB_READ_PATH, ...args],
-        { env: { ...process.env, DOC_MCP_DB_PATH: DB_PATH, PYTHONIOENCODING: 'utf-8' }, windowsHide: true },
-        (err, stdout) => {
-          if (err && !stdout) return resolve({ error: String(err.message || err) });
-          try { resolve(JSON.parse(stdout)); }
-          catch (e) { resolve({ error: 'parse: ' + String(e), raw: stdout }); }
-        }
-      );
-    });
-  ipcMain.handle('db:tables', () => runDbRead(['tables']));
-  ipcMain.handle('db:rows', (_e, table, limit, offset) =>
-    runDbRead(['rows', String(table), String(limit || 100), String(offset || 0)]));
-  ipcMain.handle('db:query', (_e, sql) => runDbRead(['query', String(sql)]));
+  ipcMain.handle('chat:send', (_e, text) => { ensureRunner().send(text); return true; });
+  ipcMain.handle('chat:approve', () => { if (runner) runner.approve(); return true; });
+  ipcMain.handle('chat:reject', (_e, fb) => { if (runner) runner.reject(fb); return true; });
+  ipcMain.handle('chat:stop', () => { if (runner) runner.stop(); return true; });
+  ipcMain.handle('chat:reset', () => { if (runner) { runner.stop(); runner = null; } return true; });
 
-  // 문서 폴더 선택
   ipcMain.handle('dir:choose', async () => {
-    const res = await dialog.showOpenDialog(mainWindow, {
-      properties: ['openDirectory'],
-      defaultPath: docDir,
-    });
+    const res = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'], defaultPath: docDir });
     if (!res.canceled && res.filePaths[0]) {
       docDir = res.filePaths[0];
-      // 폴더가 바뀌면 기존 세션을 종료해 새 cwd 로 재시작되게 한다.
-      if (runner) {
-        runner.stop();
-        runner = null;
-      }
+      if (runner) { runner.stop(); runner = null; }
     }
     return docDir;
   });
+  ipcMain.handle('env:check', () => ({ docDir, providerId, mode, model }));
 
-  // 사용자 요청 → 계획 단계(읽기 전용, 변경 없음)
-  ipcMain.handle('chat:plan', (_e, text) => {
-    ensureRunner().runPlan(text);
-    return true;
+  // 대시보드 DB 읽기
+  const dbRead = (args) => new Promise((resolve) => {
+    execFile('python', ['-u', DB_READ, ...args],
+      { env: { ...process.env, DOC_MCP_DB_PATH: DB_PATH, PYTHONIOENCODING: 'utf-8' }, windowsHide: true },
+      (err, stdout) => {
+        if (err && !stdout) return resolve({ error: String(err.message || err) });
+        try { resolve(JSON.parse(stdout)); } catch (e) { resolve({ error: 'parse', raw: stdout }); }
+      });
   });
+  ipcMain.handle('db:tables', () => dbRead(['tables']));
+  ipcMain.handle('db:rows', (_e, t, l, o) => dbRead(['rows', String(t), String(l || 100), String(o || 0)]));
+  ipcMain.handle('db:query', (_e, sql) => dbRead(['query', String(sql)]));
 
-  // 계획 승인 → 실행 단계(쓰기 허용)
-  ipcMain.handle('chat:approve', () => {
-    if (runner) runner.approveExecute();
-    return true;
-  });
-
-  // 계획 거절(+선택적 피드백 → 재계획)
-  ipcMain.handle('chat:reject', (_e, feedback) => {
-    if (runner) runner.reject(feedback);
-    return true;
-  });
-
-  // 진행 중 단계 중단(세션 유지)
-  ipcMain.handle('chat:stop', () => {
-    if (runner) runner.stop();
-    return true;
-  });
-
-  // 세션 초기화
-  ipcMain.handle('chat:reset', () => {
-    if (runner) {
-      runner.stop();
-      runner = null;
-    }
-    return true;
-  });
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
+  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
 app.on('window-all-closed', () => {
@@ -182,7 +149,4 @@ app.on('window-all-closed', () => {
   if (hwpxServer) hwpxServer.stop();
   if (process.platform !== 'darwin') app.quit();
 });
-
-app.on('before-quit', () => {
-  if (hwpxServer) hwpxServer.stop();
-});
+app.on('before-quit', () => { if (hwpxServer) hwpxServer.stop(); });

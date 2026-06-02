@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Doc MCP Desktop — 클로드 데스크탑 스타일 (클릭형 프로토타입)</title>
+<style>
+  :root{
+    --bg:#faf9f5; --surface:#ffffff; --rail:#f4f2ec;
+    --text:#2b2a27; --muted:#76736c; --faint:#9a978f;
+    --border:#e9e6df; --border2:#ded9cf;
+    --accent:#d97757; --accent-h:#c4603e; --accent-soft:#f6e9e2;
+    --user:#eceadf; --ok:#4a9a5a;
+    --struct:#f4f2ec;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{font-family:-apple-system,"Segoe UI","Malgun Gothic",system-ui,sans-serif;
+    background:var(--bg);color:var(--text);height:100vh;display:flex;font-size:15px;line-height:1.6}
+  button{font:inherit;cursor:pointer;color:inherit}
+  code{background:var(--struct);border:1px solid var(--border);border-radius:5px;padding:1px 6px;font-size:.86em}
+
+  /* ── 좌측 슬림 레일 (클로드 데스크탑 느낌) ── */
+  .rail{width:60px;background:var(--rail);border-right:1px solid var(--border);
+    display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:8px}
+  .rail .logo{width:34px;height:34px;border-radius:9px;background:var(--accent);
+    color:#fff;display:grid;place-items:center;font-size:17px;margin-bottom:6px}
+  .rail .ricon{width:40px;height:40px;border-radius:10px;border:1px solid transparent;
+    background:transparent;display:grid;place-items:center;color:var(--muted);font-size:17px}
+  .rail .ricon:hover{background:#ebe8e0}
+  .rail .ricon.active{background:#fff;border-color:var(--border);color:var(--text)}
+  .rail .grow{flex:1}
+
+  /* ── 메인 ── */
+  .app{flex:1;min-width:0;display:flex;flex-direction:column}
+  .header{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid var(--border)}
+  .title{font-weight:600;font-size:15px}
+  .folder-chip{display:flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--border);
+    border-radius:20px;padding:5px 12px;font-size:12.5px;color:var(--muted);max-width:42vw;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .folder-chip b{color:var(--text);font-weight:500}
+  .header .spacer{flex:1}
+  .ghost{background:transparent;border:1px solid var(--border);border-radius:9px;padding:6px 12px;font-size:13px;color:var(--muted)}
+  .ghost:hover{background:var(--rail);color:var(--text)}
+  .conn{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted)}
+  .dot{width:8px;height:8px;border-radius:50%}
+  .dot.ok{background:var(--ok)} .dot.off{background:#b6b2a8}
+
+  /* 로그인 배너 */
+  .banner{display:none;align-items:center;gap:9px;padding:10px 20px;background:#fbf0d9;
+    border-bottom:1px solid #ecd9a8;color:#8a6d20;font-size:13.5px}
+  body[data-login="off"] .banner{display:flex}
+  .banner code{background:#f3e3b8;border-color:#e6d196;color:#6f5616}
+
+  /* ── 대화 영역: 가운데 정렬 좁은 컬럼 ── */
+  body[data-tab="data"] .chatwrap{display:none}
+  body[data-tab="chat"] .datawrap{display:none}
+  .chatwrap{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center}
+  .scroll{flex:1;width:100%;overflow-y:auto}
+  .col{max-width:760px;margin:0 auto;padding:26px 24px 8px}
+
+  .turn{margin-bottom:26px}
+  .u-row{display:flex;justify-content:flex-end}
+  .u-bubble{background:var(--user);border-radius:16px;padding:10px 15px;max-width:80%}
+  /* 어시스턴트: 말풍선 없이 본문 텍스트 */
+  .a-block{padding:2px 2px}
+  .a-block p{margin:0 0 8px}
+  .a-block .sub{color:var(--muted);font-size:13px;margin:0 0 6px}
+
+  .greeting{color:var(--faint);text-align:center;margin-top:14vh;font-size:15px;line-height:1.9}
+  .greeting .big{font-size:22px;color:var(--text);font-weight:600;margin-bottom:6px}
+  .greeting code{font-size:13px}
+
+  /* 도구 사용(접힘) */
+  .tools{display:inline-flex;align-items:center;gap:7px;color:var(--muted);font-size:12.5px;
+    background:var(--rail);border:1px solid var(--border);border-radius:18px;padding:4px 11px;margin-bottom:10px}
+  .tools .ic{font-size:12px}
+
+  /* 조회: 대상 목록 + 구조 표 */
+  .targets{margin:2px 0 12px;padding-left:2px}
+  .targets li{margin:2px 0}
+  .struct{border:1px solid var(--border);border-radius:11px;overflow:hidden;margin:8px 0 12px;background:var(--surface)}
+  .struct .cap{background:var(--struct);padding:8px 13px;font-size:12.5px;color:var(--muted);border-bottom:1px solid var(--border)}
+  .struct table{border-collapse:collapse;width:100%;font-size:13.5px}
+  .struct td{padding:7px 13px;border-top:1px solid var(--border)}
+  .struct td:first-child{width:42%;color:var(--accent-h);font-weight:500}
+  .struct .term{color:var(--muted);font-weight:400}
+  .result-table{border-collapse:collapse;font-size:13.5px;margin-top:4px}
+  .result-table td,.result-table th{border:1px solid var(--border);padding:5px 12px;text-align:left}
+  .result-table th{background:var(--struct)}
+
+  /* 쓰기 제안 + 인라인 승인 */
+  .change{background:var(--accent-soft);border:1px solid #ecd2c4;border-radius:11px;padding:11px 14px;margin:8px 0 10px;font-size:14px}
+  .approve{display:flex;align-items:center;gap:9px;margin-top:10px;flex-wrap:wrap}
+  .approve .q{font-weight:600;margin-right:2px}
+  .btn{border-radius:10px;padding:8px 16px;border:1px solid var(--border);background:var(--surface);font-weight:600;font-size:13.5px}
+  .btn:hover{border-color:var(--border2)}
+  .btn.ok{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.ok:hover{background:var(--accent-h)}
+  .btn.no{background:transparent;border-color:#e3c7bb;color:var(--accent-h)}
+  .approve .tip{color:var(--muted);font-size:12px}
+  .done{color:var(--ok);font-weight:600}
+
+  /* 타이핑 표시 */
+  .typing{display:none;align-items:center;gap:7px;color:var(--muted);font-size:13px;margin:2px 0 8px}
+  .typing.show{display:flex}
+  .typing .d{width:6px;height:6px;border-radius:50%;background:var(--faint);animation:b 1.2s infinite}
+  .typing .d:nth-child(2){animation-delay:.2s}.typing .d:nth-child(3){animation-delay:.4s}
+  @keyframes b{0%,60%,100%{opacity:.25}30%{opacity:1}}
+
+  /* ── Composer (클로드 데스크탑 스타일) ── */
+  .composer-wrap{width:100%;display:flex;justify-content:center;padding:6px 24px 22px}
+  .composer{width:100%;max-width:760px;background:var(--surface);border:1px solid var(--border2);
+    border-radius:20px;padding:12px 14px;box-shadow:0 2px 10px rgba(60,50,40,.05)}
+  .composer:focus-within{border-color:var(--accent);box-shadow:0 2px 14px rgba(217,119,87,.12)}
+  .composer textarea{width:100%;border:none;outline:none;resize:none;background:transparent;
+    font:inherit;color:var(--text);height:26px;max-height:140px}
+  .crow{display:flex;align-items:center;gap:8px;margin-top:8px}
+  .seg{position:relative}
+  .chip{display:inline-flex;align-items:center;gap:6px;background:var(--rail);border:1px solid var(--border);
+    border-radius:18px;padding:5px 11px;font-size:12.5px;color:var(--text)}
+  .chip:hover{border-color:var(--border2)}
+  .chip .dotm{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+  .chip .k{color:var(--muted)}
+  .crow .spacer{flex:1}
+  .send{width:36px;height:36px;border-radius:50%;border:none;background:var(--accent);color:#fff;
+    font-size:16px;display:grid;place-items:center}
+  .send:hover{background:var(--accent-h)}
+  .send.stop{background:#b6453a}
+
+  .pop{position:absolute;bottom:40px;left:0;min-width:240px;background:var(--surface);border:1px solid var(--border);
+    border-radius:12px;padding:6px;box-shadow:0 10px 30px rgba(60,50,40,.15);display:none;z-index:30}
+  .pop.open{display:block}
+  .pop .pi{padding:8px 10px;border-radius:8px}
+  .pop .pi:hover{background:var(--rail)}
+  .pop .pt{font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:7px}
+  .pop .pd{color:var(--muted);font-size:12px;margin-top:1px}
+  .pop .pi .sub{margin-left:auto;color:var(--faint);font-size:11px}
+
+  /* 데이터 탭 */
+  .datawrap{flex:1;min-height:0;display:flex;flex-direction:column}
+  .dtoolbar{display:flex;gap:8px;padding:14px 20px;border-bottom:1px solid var(--border)}
+  .dtoolbar select,.dtoolbar input{background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:8px 11px;font:inherit}
+  .dtoolbar input{flex:1}
+  .dgrid{flex:1;overflow:auto;padding:16px 20px}
+  table.grid{border-collapse:collapse;width:100%;font-size:13.5px}
+  table.grid th,table.grid td{border:1px solid var(--border);padding:8px 12px;text-align:left;white-space:nowrap}
+  table.grid th{background:var(--struct);position:sticky;top:0}
+  .dmeta{color:var(--muted);font-size:12.5px;margin-bottom:10px}
+
+  /* 데모 패널 */
+  .demo{position:fixed;right:14px;bottom:14px;background:#fff;border:1px solid var(--border);
+    border-radius:12px;padding:9px 12px;font-size:12px;color:var(--muted);box-shadow:0 8px 24px rgba(60,50,40,.14);z-index:60}
+  .demo b{color:var(--accent-h)}
+  .demo .row{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  .demo button{background:var(--rail);border:1px solid var(--border);border-radius:7px;padding:4px 8px;font-size:11px}
+</style>
+</head>
+<body data-tab="chat" data-login="on" data-mode="auto" data-provider="claude">
+
+  <!-- 좌측 레일 -->
+  <div class="rail">
+    <div class="logo">✦</div>
+    <button class="ricon active" title="채팅" onclick="setTab('chat')">💬</button>
+    <button class="ricon" title="데이터" onclick="setTab('data')">🗄</button>
+    <div class="grow"></div>
+    <button class="ricon" title="새 대화" onclick="newChat()">✎</button>
+    <button class="ricon" title="설정">⚙</button>
+  </div>
+
+  <div class="app">
+    <div class="header">
+      <span class="title">Doc MCP</span>
+      <span class="folder-chip">📁 <b>MSA기반 크로스 플랫폼 개발자</b></span>
+      <button class="ghost" onclick="alert('폴더 선택(목업)')">변경</button>
+      <span class="spacer"></span>
+      <span class="conn"><span class="dot ok"></span>MCP 연결됨</span>
+    </div>
+
+    <div class="banner">⚠ <b id="bprov">Codex</b> 로그인 필요 — 터미널에서 <code id="bcmd">codex login</code>
+      <button class="ghost" style="margin-left:auto" onclick="document.body.dataset.login='on'">확인</button></div>
+
+    <!-- 채팅 -->
+    <div class="chatwrap">
+      <div class="scroll">
+        <div class="col" id="col">
+          <div class="greeting" id="greeting">
+            <div class="big">무엇을 도와드릴까요?</div>
+            한글·엑셀·워드 문서를 조회하거나 수정하고, 데이터로 모을 수 있어요.<br>
+            예: <code>평가서.hwpx 학생 명단 보여줘</code> · <code>14번에 홍길동 넣어줘</code> ·
+            <code>학생 명단 students 테이블로 모아줘</code>
+          </div>
+        </div>
+      </div>
+
+      <div class="composer-wrap">
+        <div class="composer">
+          <textarea id="input" rows="1" placeholder="메시지를 입력하세요…" oninput="autoGrow(this)"></textarea>
+          <div class="crow">
+            <!-- 모드 -->
+            <div class="seg">
+              <button class="chip" onclick="pop('mode')"><span class="dotm"></span><span class="k">모드</span> <b id="mode-name">자동</b> ▾</button>
+              <div class="pop" id="pop-mode">
+                <div class="pi" onclick="setMode('auto')"><div class="pt">자동</div><div class="pd">조회는 바로, 변경은 “승인하시겠습니까?”로 확인 (권장)</div></div>
+                <div class="pi" onclick="setMode('plan')"><div class="pt">계획</div><div class="pd">절대 변경하지 않음 · 무엇을 할지 계획만</div></div>
+                <div class="pi" onclick="setMode('edit')"><div class="pt">편집수락</div><div class="pd">묻지 않고 바로 실행 (빠름)</div></div>
+              </div>
+            </div>
+            <!-- 제공자 -->
+            <div class="seg">
+              <button class="chip" onclick="pop('prov')"><span class="dot ok" id="pdot"></span><b id="prov-name">Claude</b> ▾</button>
+              <div class="pop" id="pop-prov">
+                <div class="pi" onclick="setProvider('claude')"><div class="pt"><span class="dot ok"></span>Claude<span class="sub">로그인됨</span></div></div>
+                <div class="pi" onclick="setProvider('gemini')"><div class="pt"><span class="dot ok"></span>Gemini<span class="sub">로그인됨</span></div></div>
+                <div class="pi" onclick="setProvider('codex')"><div class="pt"><span class="dot off"></span>Codex<span class="sub">미설치</span></div></div>
+              </div>
+            </div>
+            <!-- 모델 -->
+            <div class="seg">
+              <button class="chip" onclick="pop('model')"><b id="model-name">Opus 4.8</b> ▾</button>
+              <div class="pop" id="pop-model"></div>
+            </div>
+            <span class="spacer"></span>
+            <button class="send" id="send" title="전송" onclick="onSend()">↑</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 데이터 -->
+    <div class="datawrap">
+      <div class="dtoolbar">
+        <select><option>students</option><option>evaluations</option></select>
+        <button class="ghost">↻ 새로고침</button>
+        <input placeholder="SELECT ... (Enter 실행)" />
+      </div>
+      <div class="dgrid">
+        <div class="dmeta">students · 총 14행</div>
+        <table class="grid"><thead><tr><th>no</th><th>name</th><th>source</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>강상민</td><td>평가서.hwpx</td></tr>
+            <tr><td>13</td><td>한승완</td><td>평가서.hwpx</td></tr>
+            <tr><td>14</td><td>홍길동</td><td>평가서.hwpx</td></tr>
+          </tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <div class="demo">
+    <b>데모</b> — 입력창에 직접 쳐보세요(조회/쓰기 자동 구분)
+    <div class="row">
+      <button onclick="seedRead()">조회 예시</button>
+      <button onclick="seedWrite()">쓰기 예시</button>
+      <button onclick="setProvider('codex')">Codex(미설치)</button>
+      <button onclick="setProvider('claude')">Claude</button>
+    </div>
+  </div>
+
+<script>
+  const MODELS={claude:[["Opus 4.8","최고 성능"],["Sonnet 4.6","빠름·균형"],["Haiku 4.5","경량"]],
+    gemini:[["2.5 Pro","고성능"],["2.5 Flash","빠름"]],codex:[["gpt-5-codex","코드 특화"],["gpt-5","범용"]]};
+  const PROV={claude:{name:"Claude",login:true,cmd:"claude"},gemini:{name:"Gemini",login:true,cmd:"gemini"},codex:{name:"Codex",login:false,cmd:"codex login"}};
+  const MODE={auto:"자동",plan:"계획",edit:"편집수락"};
+  const col=document.getElementById('input');
+  let busy=false;
+
+  function setTab(t){document.body.dataset.tab=t;
+    document.querySelectorAll('.rail .ricon').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.rail .ricon')[t==='chat'?0:1].classList.add('active');}
+  function pop(id){document.querySelectorAll('.pop').forEach(p=>p.id==='pop-'+id?p.classList.toggle('open'):p.classList.remove('open'));}
+  document.addEventListener('click',e=>{if(!e.target.closest('.seg'))document.querySelectorAll('.pop').forEach(p=>p.classList.remove('open'));});
+  function autoGrow(t){t.style.height='26px';t.style.height=Math.min(t.scrollHeight,140)+'px';}
+
+  function setProvider(p){document.body.dataset.provider=p;const i=PROV[p];
+    document.getElementById('prov-name').textContent=i.name;
+    document.getElementById('pdot').className='dot '+(i.login?'ok':'off');
+    const m=document.getElementById('pop-model');m.innerHTML='';
+    MODELS[p].forEach(x=>{const d=document.createElement('div');d.className='pi';
+      d.innerHTML=`<div class="pt">${x[0]}<span class="sub">${x[1]}</span></div>`;
+      d.onclick=()=>{document.getElementById('model-name').textContent=x[0];pop('model');};m.appendChild(d);});
+    document.getElementById('model-name').textContent=MODELS[p][0][0];
+    document.body.dataset.login=i.login?'on':'off';
+    document.getElementById('bprov').textContent=i.name;document.getElementById('bcmd').textContent=i.cmd;
+    document.querySelectorAll('.pop').forEach(x=>x.classList.remove('open'));}
+  function setMode(m){document.body.dataset.mode=m;document.getElementById('mode-name').textContent=MODE[m];pop('mode');}
+
+  const colEl=document.getElementById('col');
+  function clearGreeting(){const g=document.getElementById('greeting');if(g)g.remove();}
+  function scrollEnd(){const s=document.querySelector('.scroll');s.scrollTop=s.scrollHeight;}
+  function addUser(t){clearGreeting();const d=document.createElement('div');d.className='turn';
+    d.innerHTML=`<div class="u-row"><div class="u-bubble"></div></div>`;d.querySelector('.u-bubble').textContent=t;colEl.appendChild(d);scrollEnd();}
+  function addAssistant(html){const d=document.createElement('div');d.className='turn';
+    d.innerHTML=`<div class="a-block">${html}</div>`;colEl.appendChild(d);scrollEnd();return d;}
+  function setBusy(b){busy=b;const s=document.getElementById('send');s.textContent=b?'■':'↑';s.classList.toggle('stop',b);}
+  function typing(){const d=addAssistant(`<div class="typing show"><span class="d"></span><span class="d"></span><span class="d"></span> 작업 중…</div>`);return d;}
+
+  const READ=/(보여|조회|목록|구조|요약|뭐|어떤|찾아|알려|몇|확인)/;
+  const WRITE=/(넣|바꾸|바꿔|추가|삭제|저장|만들|수정|채워|입력|등록|모아)/;
+
+  function readBody(){return `
+    <p class="sub">조회 대상</p>
+    <ul class="targets"><li>📄 <code>(중간평가)평가서.hwpx</code> → 표 0 (학생 명부)</li></ul>
+    <p>이 파일의 구조입니다 — 도메인 용어 포함:</p>
+    <div class="struct"><div class="cap">표 0 · 학생 명부 (24행 × 9열 · 2단 구성)</div>
+    <table>
+      <tr><td>A열 <span class="term">번호 (no)</span></td><td>좌측 블록 일련번호 1–15</td></tr>
+      <tr><td>B열 <span class="term">성명 (name)</span></td><td>학생 이름 · 병합셀</td></tr>
+      <tr><td>D열 <span class="term">확인 (confirm)</span></td><td>서명/확인란</td></tr>
+      <tr><td>E열 <span class="term">생년월일 (birth)</span></td><td>YYYY-MM-DD</td></tr>
+      <tr><td>F–I열</td><td>우측 블록 (16–30번, 동일 구조)</td></tr>
+    </table></div>
+    <p>현재 등록 13명: 강상민, 강태오 … 한승완. <b>14–30번은 비어 있습니다.</b></p>`;}
+
+  function writeProposal(){return `
+    <div class="tools"><span class="ic">🔧</span> 도구 2개 사용 · hwp_read_table, hwp_get_cell</div>
+    <p>14번 성명칸(<code>B23</code>, 현재 비어 있음)에 <b>“홍길동”</b>을 입력하겠습니다. 입력 후 다시 읽어 확인합니다.</p>`;}
+
+  function execDone(){return `
+    <div class="tools"><span class="ic">🔧</span> 도구 2개 사용 · hwp_set_cell, hwp_get_cell</div>
+    <p><span class="done">✓ 반영 완료</span> — <code>B23</code> = “홍길동”. 재조회로 확인했습니다. (저장됨)</p>`;}
+
+  function respond(text){
+    const mode=document.body.dataset.mode;
+    const isWrite=WRITE.test(text)&&!READ.test(text) || (WRITE.test(text)&&/(넣|바꾸|추가|삭제|만들|채워|입력|모아|등록)/.test(text));
+    const t=typing();setBusy(true);
+    setTimeout(()=>{
+      t.remove();
+      if(!isWrite){ addAssistant(readBody()); setBusy(false); return; }
+      if(mode==='plan'){ addAssistant(writeProposal()+`<p class="sub" style="margin-top:8px">계획 모드 — 실행하지 않았습니다. 실행하려면 모드를 ‘자동’ 또는 ‘편집수락’으로 바꾸세요.</p>`); setBusy(false); return; }
+      if(mode==='edit'){ const d=typing(); setTimeout(()=>{d.remove();addAssistant(execDone());setBusy(false);},700); return; }
+      // auto: 제안 + 인라인 승인
+      const node=addAssistant(writeProposal()+`
+        <div class="approve">
+          <span class="q">승인하시겠습니까?</span>
+          <button class="btn ok">승인</button>
+          <button class="btn no">거절</button>
+          <span class="tip">거절 후 수정사항을 입력하면 반영해 다시 제안합니다.</span>
+        </div>`);
+      node.querySelector('.btn.ok').onclick=()=>{node.querySelector('.approve').outerHTML='<p class="sub">승인됨 · 실행합니다.</p>';
+        const d=typing();setBusy(true);setTimeout(()=>{d.remove();addAssistant(execDone());setBusy(false);},800);};
+      node.querySelector('.btn.no').onclick=()=>{node.querySelector('.approve').outerHTML='<p class="sub">취소했습니다. 수정사항을 입력해 주세요.</p>';setBusy(false);};
+      setBusy(false);
+    },650);
+  }
+
+  function onSend(){
+    if(busy)return; const t=col.value.trim(); if(!t)return;
+    col.value='';autoGrow(col);addUser(t);respond(t);
+  }
+  col.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();onSend();}});
+
+  function seedRead(){col.value='평가서.hwpx 학생 명단 보여줘';onSend();}
+  function seedWrite(){col.value='14번에 홍길동 넣어줘';onSend();}
+  function newChat(){colEl.innerHTML='<div class="greeting" id="greeting"><div class="big">무엇을 도와드릴까요?</div>새 대화입니다.</div>';}
+
+  setProvider('claude');setMode('auto');setBusy(false);
+</script>
+</body>
+</html>

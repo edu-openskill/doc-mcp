@@ -2,27 +2,32 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
-// 렌더러에 노출하는 안전한 브리지 (contextIsolation 유지)
 contextBridge.exposeInMainWorld('api', {
-  // 요청/응답
+  // 설정/상태
   checkEnv: () => ipcRenderer.invoke('env:check'),
+  listProviders: () => ipcRenderer.invoke('providers:list'),
+  setProvider: (id, model) => ipcRenderer.invoke('provider:set', id, model),
+  setModel: (m) => ipcRenderer.invoke('model:set', m),
+  setMode: (m) => ipcRenderer.invoke('mode:set', m),
   chooseDir: () => ipcRenderer.invoke('dir:choose'),
-  plan: (text) => ipcRenderer.invoke('chat:plan', text),
+
+  // 대화
+  send: (text) => ipcRenderer.invoke('chat:send', text),
   approve: () => ipcRenderer.invoke('chat:approve'),
-  reject: (feedback) => ipcRenderer.invoke('chat:reject', feedback),
+  reject: (fb) => ipcRenderer.invoke('chat:reject', fb),
   stop: () => ipcRenderer.invoke('chat:stop'),
   reset: () => ipcRenderer.invoke('chat:reset'),
 
-  // 대시보드(데이터)
+  // 데이터(대시보드)
   dbTables: () => ipcRenderer.invoke('db:tables'),
-  dbRows: (table, limit, offset) => ipcRenderer.invoke('db:rows', table, limit, offset),
+  dbRows: (t, l, o) => ipcRenderer.invoke('db:rows', t, l, o),
   dbQuery: (sql) => ipcRenderer.invoke('db:query', sql),
 
-  // 스트리밍 이벤트 구독
-  onSystem: (cb) => ipcRenderer.on('claude:system', (_e, v) => cb(v)),
-  onText: (cb) => ipcRenderer.on('claude:text', (_e, v) => cb(v)),
-  onTool: (cb) => ipcRenderer.on('claude:tool', (_e, v) => cb(v)),
-  onResult: (cb) => ipcRenderer.on('claude:result', (_e, v) => cb(v)),
-  onError: (cb) => ipcRenderer.on('claude:error', (_e, v) => cb(v)),
-  onExit: (cb) => ipcRenderer.on('claude:exit', (_e, v) => cb(v)),
+  // 스트리밍 이벤트
+  onSystem: (cb) => ipcRenderer.on('agent:system', (_e, v) => cb(v)),
+  onText: (cb) => ipcRenderer.on('agent:text', (_e, v) => cb(v)),
+  onTool: (cb) => ipcRenderer.on('agent:tool', (_e, v) => cb(v)),
+  onResult: (cb) => ipcRenderer.on('agent:result', (_e, v) => cb(v)),
+  onError: (cb) => ipcRenderer.on('agent:error', (_e, v) => cb(v)),
+  onExit: (cb) => ipcRenderer.on('agent:exit', (_e, v) => cb(v)),
 });

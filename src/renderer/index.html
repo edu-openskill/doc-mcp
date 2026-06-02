@@ -1,66 +1,84 @@
 <!DOCTYPE html>
 <html lang="ko">
-  <head>
-    <meta charset="UTF-8" />
-    <meta
-      http-equiv="Content-Security-Policy"
-      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'"
-    />
-    <title>Doc MCP Desktop</title>
-    <link rel="stylesheet" href="styles.css" />
-  </head>
-  <body>
-    <header class="topbar">
-      <div class="brand">📄 Doc MCP Desktop</div>
-      <nav class="tabs">
-        <button id="tab-chat" class="tab active">💬 채팅</button>
-        <button id="tab-data" class="tab">🗄 데이터</button>
-      </nav>
-      <div class="controls">
-        <button id="btn-dir" class="btn">📁 문서 폴더</button>
-        <span id="dir-label" class="dir-label" title="">—</span>
-        <button id="btn-reset" class="btn ghost">↺ 새 대화</button>
-      </div>
-    </header>
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+  <title>Doc MCP</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body data-tab="chat" data-mode="auto" data-provider="claude">
+  <div class="rail">
+    <div class="logo">✦</div>
+    <button class="ricon active" id="rail-chat" title="채팅">💬</button>
+    <button class="ricon" id="rail-data" title="데이터">🗄</button>
+    <div class="grow"></div>
+    <button class="ricon" id="rail-new" title="새 대화">✎</button>
+  </div>
 
-    <div id="status" class="status"></div>
-
-    <main id="messages" class="messages">
-      <div class="hint">
-        한글(.hwpx) · 엑셀(.xlsx) · 워드(.docx) 문서가 든 폴더를 선택하고,
-        무엇을 할지 적어보세요.<br />
-        <b>먼저 계획을 보여주고, 승인하면 실행</b>합니다.<br />
-        예: <code>이 폴더 평가서들 학생명단을 DB에 모아줘</code> ·
-        <code>보고서.hwpx 14번에 홍길동</code>
-      </div>
-    </main>
-
-    <section id="view-data" class="view-data" hidden>
-      <div class="data-toolbar">
-        <select id="table-select" class="data-select"></select>
-        <button id="btn-refresh" class="btn">↻ 새로고침</button>
-        <input id="query-input" class="query-input"
-               placeholder="SELECT ... (직접 쿼리, Enter 실행)" />
-      </div>
-      <div id="data-grid" class="data-grid"></div>
-    </section>
-
-    <div id="approval-bar" class="approval-bar" hidden>
-      <span class="approval-label">이 계획을 실행할까요?</span>
-      <button id="btn-approve" class="btn approve">✓ 승인 · 실행</button>
-      <button id="btn-reject" class="btn reject">✗ 거절</button>
-      <span class="approval-hint">거절 시 입력창에 수정사항을 적으면 반영해 다시 계획합니다.</span>
+  <div class="app">
+    <div class="header">
+      <span class="title">Doc MCP</span>
+      <span class="folder-chip" id="folder-chip" title="">📁 <b>폴더 미선택</b></span>
+      <button class="ghost" id="btn-dir">변경</button>
+      <span class="spacer"></span>
+      <span class="conn" id="conn"><span class="dot off"></span>연결 확인 중…</span>
     </div>
 
-    <footer class="composer">
-      <textarea
-        id="input"
-        rows="2"
-        placeholder="무엇을 할지 입력하세요. 먼저 계획을 보여주고, 승인하면 실행합니다. (Enter 전송)"
-      ></textarea>
-      <button id="btn-send" class="btn primary">계획</button>
-    </footer>
+    <div class="banner" id="banner" hidden>
+      ⚠ <b id="banner-prov"></b> <span id="banner-msg"></span>
+      <button class="ghost" id="banner-x" style="margin-left:auto">닫기</button>
+    </div>
 
-    <script src="renderer.js"></script>
-  </body>
+    <!-- 채팅 -->
+    <div class="chatwrap">
+      <div class="scroll"><div class="col" id="col">
+        <div class="greeting" id="greeting">
+          <div class="big">무엇을 도와드릴까요?</div>
+          한글·엑셀·워드 문서를 조회하거나 수정하고, 데이터로 모을 수 있어요.<br />
+          예: <code>평가서.hwpx 학생 명단 보여줘</code> · <code>14번에 홍길동 넣어줘</code> ·
+          <code>학생 명단 students 테이블로 모아줘</code>
+        </div>
+      </div></div>
+
+      <div class="composer-wrap">
+        <div class="composer">
+          <textarea id="input" rows="1" placeholder="메시지를 입력하세요…"></textarea>
+          <div class="crow">
+            <div class="seg">
+              <button class="chip" id="mode-btn"><span class="dotm"></span><span class="k">모드</span> <b id="mode-name">자동</b> ▾</button>
+              <div class="pop" id="pop-mode">
+                <div class="pi" data-mode="auto"><div class="pt">자동</div><div class="pd">조회는 바로, 변경은 “승인하시겠습니까?”로 확인 (권장)</div></div>
+                <div class="pi" data-mode="plan"><div class="pt">계획</div><div class="pd">절대 변경하지 않음 · 무엇을 할지 계획만</div></div>
+                <div class="pi" data-mode="edit"><div class="pt">편집수락</div><div class="pd">묻지 않고 바로 실행 (빠름)</div></div>
+              </div>
+            </div>
+            <div class="seg">
+              <button class="chip" id="prov-btn"><span class="dot off" id="prov-dot"></span><b id="prov-name">Claude</b> ▾</button>
+              <div class="pop" id="pop-prov"></div>
+            </div>
+            <div class="seg">
+              <button class="chip" id="model-btn"><b id="model-name">—</b> ▾</button>
+              <div class="pop" id="pop-model"></div>
+            </div>
+            <span class="spacer"></span>
+            <button class="send" id="send" title="전송">↑</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 데이터 -->
+    <div class="datawrap">
+      <div class="dtoolbar">
+        <select id="table-select"></select>
+        <button class="ghost" id="btn-refresh">↻ 새로고침</button>
+        <input id="query-input" placeholder="SELECT ... (Enter 실행)" />
+      </div>
+      <div class="dgrid" id="data-grid"></div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
 </html>
