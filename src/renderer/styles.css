@@ -49,6 +49,97 @@ body {
   gap: 8px;
 }
 
+.tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.tab {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.tab.active {
+  background: var(--panel-2);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.view-data {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.data-toolbar {
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.data-select,
+.query-input {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font: inherit;
+}
+
+.query-input {
+  flex: 1;
+}
+
+.data-grid {
+  flex: 1;
+  overflow: auto;
+  padding: 12px 14px;
+}
+
+.data-meta {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.data-empty {
+  color: var(--muted);
+  text-align: center;
+  margin-top: 40px;
+}
+
+table.grid {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+
+table.grid th,
+table.grid td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+table.grid th {
+  background: var(--panel);
+  position: sticky;
+  top: 0;
+}
+
+table.grid tbody tr:nth-child(even) {
+  background: var(--panel-2);
+}
+
 .dir-label {
   max-width: 320px;
   overflow: hidden;
@@ -157,12 +248,55 @@ code {
   font-family: ui-monospace, Consolas, monospace;
 }
 
+.msg.plan {
+  align-self: flex-start;
+  background: #21303f;
+  border: 1px solid #34506b;
+  border-left: 3px solid #4a90d9;
+}
+
+.msg.phase {
+  align-self: center;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 2px 8px;
+}
+
 .msg.error {
   align-self: stretch;
   background: var(--err);
   border: 1px solid #7a3a3a;
   color: #ffcaca;
   font-size: 13px;
+}
+
+.approval-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #233140;
+  border-top: 1px solid #34506b;
+}
+
+.approval-label {
+  font-weight: 600;
+}
+
+.approval-hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.btn.approve {
+  background: #2e7d32;
+  border-color: #2e7d32;
+}
+
+.btn.reject {
+  background: #6b2b2b;
+  border-color: #6b2b2b;
 }
 
 .composer {

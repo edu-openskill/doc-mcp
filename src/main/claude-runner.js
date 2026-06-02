@@ -1,26 +1,41 @@
 'use strict';
 
 const { spawn, spawnSync } = require('child_process');
-const path = require('path');
 const os = require('os');
 
 /**
- * claude CLI를 헤드리스 stream-json 모드로 구동하는 러너.
+ * claude CLI를 헤드리스로 구동하되, **계획 → 검토 → 승인 → 실행** 모드를 강제한다.
  *
- * - 하나의 claude 프로세스를 stdin(--input-format stream-json)으로 살려두고
- *   사용자 메시지를 JSON 줄로 주입하여 멀티턴 세션을 유지한다.
- * - stdout(--output-format stream-json --verbose --include-partial-messages)을
- *   NDJSON으로 파싱하여 토큰/툴호출/완료 이벤트를 콜백으로 흘려보낸다.
+ * - 계획 단계: 읽기 전용 도구만 허용 + `--permission-mode dontAsk`(허용목록 외 전부 거부)
+ *   → 물리적으로 변경 불가능한 상태에서 "무엇을 바꿀지" 계획만 출력.
+ * - 실행 단계: 사용자가 승인하면 같은 세션을 `--resume <session_id>` 로 이어,
+ *   쓰기 도구 허용 + `acceptEdits` 로 계획을 실행하고 쓰기 후 재조회로 검증.
  *
- * PTY를 쓰지 않으므로 TUI 출력 파싱이 필요 없다.
+ * 각 단계는 별도의 `claude -p` 호출이며 session_id 로 대화를 잇는다.
+ * 프롬프트(한글/특수문자 포함)는 argv 대신 stdin 으로 넣어 인용 문제를 피한다.
  */
+
+// 계획 단계에서 허용하는 읽기 전용 도구 (우리가 통제하는 hwp/db + 파일 읽기)
+// excel/docx 서버의 읽기 도구명이 확정되면 여기에 추가한다.
+const READ_ALLOW = [
+  'mcp__hwp__hwp_open',
+  'mcp__hwp__hwp_status',
+  'mcp__hwp__hwp_get_text',
+  'mcp__hwp__hwp_read_table',
+  'mcp__hwp__hwp_get_cell',
+  'mcp__db__db_list_tables',
+  'mcp__db__db_schema',
+  'mcp__db__db_query',
+  'Read', 'Glob', 'Grep',
+].join(',');
+
+// 실행 단계에서 허용하는 전체 도구
+const WRITE_ALLOW = 'mcp__hwp__*,mcp__excel__*,mcp__docx__*,mcp__db__*,Read,Glob,Grep';
+
 class ClaudeRunner {
   /**
-   * @param {object} opts
-   * @param {string} opts.cwd          작업 디렉터리(문서 폴더)
-   * @param {string} opts.mcpConfig    mcp.json 절대 경로
-   * @param {string} [opts.allowedTools] 사전 승인 툴 패턴
-   * @param {object} handlers  { onText, onTool, onResult, onError, onExit, onSystem }
+   * @param {object} opts {cwd, mcpConfig, planPromptFile, execPromptFile}
+   * @param {object} handlers {onText,onTool,onResult,onError,onExit,onSystem}
    */
   constructor(opts, handlers) {
     this.opts = opts;
@@ -28,21 +43,14 @@ class ClaudeRunner {
     this.proc = null;
     this.buffer = '';
     this.sessionId = null;
-    this._reqSeq = 0;
+    this.phase = 'idle'; // idle | planning | executing
   }
 
-  /** claude 실행 파일 경로를 찾는다(Windows에서는 .cmd/.ps1 래퍼). */
   static resolveClaudeCommand() {
     const isWin = process.platform === 'win32';
-    // Windows: npm 전역 설치 시 claude.cmd 가 PATH에 있다.
-    const candidates = isWin
-      ? ['claude.cmd', 'claude.exe', 'claude']
-      : ['claude'];
+    const candidates = isWin ? ['claude.cmd', 'claude.exe', 'claude'] : ['claude'];
     for (const cmd of candidates) {
-      const probe = spawnSync(cmd, ['--version'], {
-        shell: isWin,
-        encoding: 'utf8',
-      });
+      const probe = spawnSync(cmd, ['--version'], { shell: isWin, encoding: 'utf8' });
       if (!probe.error && probe.status === 0) {
         return { command: cmd, version: (probe.stdout || '').trim() };
       }
@@ -50,7 +58,6 @@ class ClaudeRunner {
     return null;
   }
 
-  /** claude 설치 + 로그인 상태를 점검한다. */
   static checkEnvironment() {
     const resolved = ClaudeRunner.resolveClaudeCommand();
     if (!resolved) {
@@ -64,29 +71,64 @@ class ClaudeRunner {
     return { ok: true, command: resolved.command, version: resolved.version };
   }
 
-  start() {
+  /** 사용자 요청 → 계획 단계 실행(읽기 전용). 변경은 일어나지 않는다. */
+  runPlan(text) {
+    this._spawnPhase({
+      phase: 'planning',
+      prompt: text,
+      allow: READ_ALLOW,
+      permissionMode: 'dontAsk',
+      systemPromptFile: this.opts.planPromptFile,
+    });
+  }
+
+  /** 승인됨 → 실행 단계(쓰기 허용). 직전 계획 세션을 이어 실행한다. */
+  approveExecute() {
+    this._spawnPhase({
+      phase: 'executing',
+      prompt:
+        '위 계획이 승인되었습니다. 계획한 변경을 그대로 실행하세요. ' +
+        '각 쓰기 작업 후에는 반드시 해당 셀/내용을 다시 읽어 반영을 검증하고 결과를 보고하세요.',
+      allow: WRITE_ALLOW,
+      permissionMode: 'acceptEdits',
+      systemPromptFile: this.opts.execPromptFile,
+    });
+  }
+
+  /** 거절 → 사용자가 피드백을 주면 다음 runPlan 이 같은 세션을 이어 다시 계획한다. */
+  reject(feedback) {
+    if (feedback && feedback.trim()) {
+      this.runPlan('이전 계획은 거절되었습니다. 다음 피드백을 반영해 다시 계획하세요: ' + feedback);
+    } else {
+      this.phase = 'idle';
+      this.handlers.onResult && this.handlers.onResult({ phase: 'rejected' });
+    }
+  }
+
+  _spawnPhase({ phase, prompt, allow, permissionMode, systemPromptFile }) {
     const env = ClaudeRunner.checkEnvironment();
     if (!env.ok) {
       this.handlers.onError && this.handlers.onError(env.message);
-      return false;
+      return;
     }
-
-    const allow =
-      this.opts.allowedTools ||
-      'mcp__hwp__*,mcp__excel__*,mcp__docx__*,Read,Glob,Grep';
+    if (this.proc) this.stop();
+    this.phase = phase;
+    this.buffer = '';
 
     const args = [
       '-p',
-      '--input-format', 'stream-json',
       '--output-format', 'stream-json',
       '--verbose',
       '--include-partial-messages',
       '--mcp-config', this.opts.mcpConfig,
-      '--permission-mode', 'acceptEdits',
+      '--permission-mode', permissionMode,
       '--allowedTools', allow,
     ];
-    if (this.opts.systemPromptFile) {
-      args.push('--append-system-prompt-file', this.opts.systemPromptFile);
+    if (systemPromptFile) {
+      args.push('--append-system-prompt-file', systemPromptFile);
+    }
+    if (this.sessionId) {
+      args.push('--resume', this.sessionId);
     }
 
     this.proc = spawn(env.command, args, {
@@ -97,78 +139,32 @@ class ClaudeRunner {
     });
 
     this.proc.stdout.setEncoding('utf8');
-    this.proc.stdout.on('data', (chunk) => this._onStdout(chunk));
-
+    this.proc.stdout.on('data', (c) => this._onStdout(c));
     this.proc.stderr.setEncoding('utf8');
-    this.proc.stderr.on('data', (chunk) => {
-      // stderr 는 진단용. 인증 만료 등 힌트가 여기 올 수 있다.
-      const text = String(chunk);
-      if (/login|authenticat|unauthor/i.test(text)) {
+    this.proc.stderr.on('data', (c) => {
+      const t = String(c);
+      if (/login|authenticat|unauthor/i.test(t)) {
         this.handlers.onError &&
           this.handlers.onError(
-            'claude 인증이 필요합니다. 터미널에서 "claude" 를 한 번 실행해 로그인(구독) 하세요.\n' +
-              text.trim()
+            'claude 인증이 필요합니다. 터미널에서 "claude" 를 실행해 로그인(구독)하세요.\n' + t.trim()
           );
       }
     });
-
-    this.proc.on('error', (err) => {
-      this.handlers.onError && this.handlers.onError(String(err.message || err));
-    });
-
-    this.proc.on('exit', (code) => {
-      this.handlers.onExit && this.handlers.onExit(code);
+    this.proc.on('error', (e) => this.handlers.onError && this.handlers.onError(String(e.message || e)));
+    this.proc.on('exit', () => {
+      this.handlers.onExit && this.handlers.onExit(this.phase);
       this.proc = null;
     });
 
-    return true;
+    // 프롬프트는 stdin 으로 전달(인용 문제 회피, BOM 없음)
+    this.proc.stdin.write(prompt);
+    this.proc.stdin.end();
   }
 
-  /** 사용자 메시지를 stream-json 한 줄로 stdin 에 주입한다. */
-  send(text) {
-    if (!this.proc) {
-      if (!this.start()) return;
-    }
-    const msg = {
-      type: 'user',
-      message: {
-        role: 'user',
-        content: [{ type: 'text', text }],
-      },
-    };
-    this.proc.stdin.write(JSON.stringify(msg) + '\n');
-  }
-
-  /**
-   * 현재 진행 중인 생성(턴)만 중단한다. 세션 프로세스는 살려두어
-   * 곧바로 다음 메시지를 보낼 수 있다. (control_request:interrupt)
-   * @returns {boolean} 인터럽트 요청을 보냈으면 true
-   */
-  interrupt() {
-    if (!this.proc) return false;
-    const reqId = `int_${++this._reqSeq}`;
-    try {
-      this.proc.stdin.write(
-        JSON.stringify({
-          type: 'control_request',
-          request_id: reqId,
-          request: { subtype: 'interrupt' },
-        }) + '\n'
-      );
-      return true;
-    } catch (_) {
-      // stdin 이 닫혔으면 프로세스를 강제 종료한다(최후 수단).
-      this.stop();
-      return false;
-    }
-  }
-
-  /** 세션 자체를 완전히 종료한다(프로세스 kill). */
+  /** 진행 중인 단계를 중단한다(프로세스 종료). 세션은 유지. */
   stop() {
     if (this.proc) {
-      try {
-        this.proc.stdin.end();
-      } catch (_) {}
+      try { this.proc.stdin.end(); } catch (_) {}
       this.proc.kill();
       this.proc = null;
     }
@@ -182,11 +178,7 @@ class ClaudeRunner {
       this.buffer = this.buffer.slice(idx + 1);
       if (!line) continue;
       let evt;
-      try {
-        evt = JSON.parse(line);
-      } catch (_) {
-        continue; // 부분 라인/비JSON 무시
-      }
+      try { evt = JSON.parse(line); } catch (_) { continue; }
       this._dispatch(evt);
     }
   }
@@ -196,41 +188,31 @@ class ClaudeRunner {
       case 'system':
         if (evt.subtype === 'init') {
           this.sessionId = evt.session_id || this.sessionId;
-          this.handlers.onSystem && this.handlers.onSystem(evt);
+          this.handlers.onSystem && this.handlers.onSystem({ ...evt, phase: this.phase });
         } else if (evt.subtype === 'api_retry') {
-          this.handlers.onSystem && this.handlers.onSystem(evt);
+          this.handlers.onSystem && this.handlers.onSystem({ ...evt, phase: this.phase });
         }
         break;
-
       case 'stream_event': {
-        // 토큰 단위 텍스트 델타
         const e = evt.event || {};
-        if (
-          e.type === 'content_block_delta' &&
-          e.delta &&
-          e.delta.type === 'text_delta'
-        ) {
+        if (e.type === 'content_block_delta' && e.delta && e.delta.type === 'text_delta') {
           this.handlers.onText && this.handlers.onText(e.delta.text);
         }
         break;
       }
-
       case 'assistant': {
-        // 완성된 assistant 메시지 — tool_use 블록에서 툴 호출 표면화
         const content = (evt.message && evt.message.content) || [];
         for (const block of content) {
           if (block.type === 'tool_use') {
-            this.handlers.onTool &&
-              this.handlers.onTool({ name: block.name, input: block.input });
+            this.handlers.onTool && this.handlers.onTool({ name: block.name, input: block.input });
           }
         }
         break;
       }
-
       case 'result':
-        this.handlers.onResult && this.handlers.onResult(evt);
+        if (evt.session_id) this.sessionId = evt.session_id;
+        this.handlers.onResult && this.handlers.onResult({ ...evt, phase: this.phase });
         break;
-
       default:
         break;
     }

@@ -4,6 +4,7 @@ const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+const { execFile } = require('child_process');
 const { ClaudeRunner } = require('./claude-runner');
 const { HwpxServer } = require('./hwpx-server');
 
@@ -13,8 +14,13 @@ let docDir = os.homedir();
 let hwpxServer = null;
 
 const APP_ROOT = path.join(__dirname, '..', '..');
-const SYSTEM_PROMPT_PATH = path.join(APP_ROOT, 'system-prompt.md');
-// 런타임 MCP 설정(한컴은 HTTP, 엑셀/워드는 stdio)을 생성해 둘 경로
+const PLAN_PROMPT_PATH = path.join(APP_ROOT, 'system-prompt-plan.md');
+const EXEC_PROMPT_PATH = path.join(APP_ROOT, 'system-prompt-execute.md');
+const DB_SERVER_PATH = path.join(APP_ROOT, 'mcp-servers', 'sqlite_db', 'sqlite_mcp_server.py');
+const DB_READ_PATH = path.join(APP_ROOT, 'mcp-servers', 'sqlite_db', 'db_read.py');
+// 통합 DB 파일 (MCP 서버 쓰기 / 앱이 직접 읽기). WAL 로 동시접근.
+const DB_PATH = path.join(app.getPath('userData'), 'data.db');
+// 런타임 MCP 설정(한컴=HTTP, 엑셀/워드=stdio, db=stdio)
 const RUNTIME_MCP_PATH = path.join(app.getPath('userData'), 'mcp.runtime.json');
 
 function writeRuntimeMcpConfig(hwpUrl) {
@@ -23,6 +29,11 @@ function writeRuntimeMcpConfig(hwpUrl) {
       hwp: { type: 'http', url: hwpUrl },
       excel: { command: 'npx', args: ['-y', '@negokaz/excel-mcp-server'] },
       docx: { command: 'npx', args: ['-y', '@modelcontextprotocol-server/word'] },
+      db: {
+        command: 'python',
+        args: ['-u', DB_SERVER_PATH],
+        env: { DOC_MCP_DB_PATH: DB_PATH },
+      },
     },
   };
   fs.writeFileSync(RUNTIME_MCP_PATH, JSON.stringify(cfg, null, 2), 'utf8');
@@ -54,7 +65,12 @@ function ensureRunner() {
   if (runner) return runner;
   const mcpConfig = writeRuntimeMcpConfig(hwpxServer ? hwpxServer.url : 'http://127.0.0.1:8765/mcp');
   runner = new ClaudeRunner(
-    { cwd: docDir, mcpConfig, systemPromptFile: SYSTEM_PROMPT_PATH },
+    {
+      cwd: docDir,
+      mcpConfig,
+      planPromptFile: PLAN_PROMPT_PATH,
+      execPromptFile: EXEC_PROMPT_PATH,
+    },
     {
       onSystem: (evt) => emit('claude:system', evt),
       onText: (text) => emit('claude:text', text),
@@ -87,6 +103,25 @@ app.whenReady().then(async () => {
     return { ...env, docDir };
   });
 
+  // 대시보드: data.db 를 파이썬 헬퍼로 읽어 JSON 반환(읽기 전용)
+  const runDbRead = (args) =>
+    new Promise((resolve) => {
+      execFile(
+        'python',
+        ['-u', DB_READ_PATH, ...args],
+        { env: { ...process.env, DOC_MCP_DB_PATH: DB_PATH, PYTHONIOENCODING: 'utf-8' }, windowsHide: true },
+        (err, stdout) => {
+          if (err && !stdout) return resolve({ error: String(err.message || err) });
+          try { resolve(JSON.parse(stdout)); }
+          catch (e) { resolve({ error: 'parse: ' + String(e), raw: stdout }); }
+        }
+      );
+    });
+  ipcMain.handle('db:tables', () => runDbRead(['tables']));
+  ipcMain.handle('db:rows', (_e, table, limit, offset) =>
+    runDbRead(['rows', String(table), String(limit || 100), String(offset || 0)]));
+  ipcMain.handle('db:query', (_e, sql) => runDbRead(['query', String(sql)]));
+
   // 문서 폴더 선택
   ipcMain.handle('dir:choose', async () => {
     const res = await dialog.showOpenDialog(mainWindow, {
@@ -104,17 +139,28 @@ app.whenReady().then(async () => {
     return docDir;
   });
 
-  // 사용자 메시지 전송
-  ipcMain.handle('chat:send', (_e, text) => {
-    const r = ensureRunner();
-    r.send(text);
+  // 사용자 요청 → 계획 단계(읽기 전용, 변경 없음)
+  ipcMain.handle('chat:plan', (_e, text) => {
+    ensureRunner().runPlan(text);
     return true;
   });
 
-  // 진행 중인 생성 중단 (세션은 유지)
+  // 계획 승인 → 실행 단계(쓰기 허용)
+  ipcMain.handle('chat:approve', () => {
+    if (runner) runner.approveExecute();
+    return true;
+  });
+
+  // 계획 거절(+선택적 피드백 → 재계획)
+  ipcMain.handle('chat:reject', (_e, feedback) => {
+    if (runner) runner.reject(feedback);
+    return true;
+  });
+
+  // 진행 중 단계 중단(세션 유지)
   ipcMain.handle('chat:stop', () => {
-    if (runner) return runner.interrupt();
-    return false;
+    if (runner) runner.stop();
+    return true;
   });
 
   // 세션 초기화

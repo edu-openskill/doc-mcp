@@ -8,6 +8,17 @@
 한컴이 직접 열고/편집/저장하므로 **병합 셀·빈 셀·서식·PDF까지 완전 처리**된다
 (파싱 기반 hwp-mcp가 실패하던 빈/병합 셀 쓰기 문제 해결).
 
+### 승인 모드 (계획 → 검토 → 승인 → 실행)
+질의하면 **바로 바꾸지 않는다.** 먼저 **계획 단계**(읽기 전용 도구 + `dontAsk` 로 쓰기
+물리 차단)에서 무엇을 바꿀지 계획만 보여주고, 사용자가 **[승인]** 하면 같은 세션을
+`--resume` 로 이어 **실행 단계**(쓰기 허용)에서 변경 후 재조회로 검증한다. **[거절]** 시
+입력창에 수정사항을 적으면 반영해 다시 계획한다.
+
+### 통합 데이터 (SQLite) + 데이터 탭
+여러 문서의 정형 데이터를 로컬 **SQLite**(`userData/data.db`)에 축적해 집계·교차 질의한다.
+claude가 문서를 읽어 테이블을 만들고(`db_*` 도구) 적재하며, 앱의 **데이터 탭**에서 테이블·
+행·임의 SELECT 를 열람한다(파이썬 헬퍼로 읽어 네이티브 모듈 불필요, WAL 정확히 반영).
+
 ```
 [채팅 UI] → IPC → [Electron Main] ┬→ spawn claude -p (stream-json)
                                    │      └→ MCP: hwp(HTTP) / excel·docx(stdio)
@@ -81,13 +92,15 @@ npm run dist   # electron-builder → NSIS 설치 파일
 
 | 파일                                          | 역할                                         |
 | --------------------------------------------- | -------------------------------------------- |
-| `src/main/main.js`                            | Electron 메인 · IPC · 서버 수명주기          |
-| `src/main/claude-runner.js`                   | claude 헤드리스 spawn · stream-json · 인터럽트 |
+| `src/main/main.js`                            | Electron 메인 · IPC · 서버 수명주기 · DB 읽기 |
+| `src/main/claude-runner.js`                   | claude 헤드리스 · **계획/실행 단계**(dontAsk↔acceptEdits, --resume) |
 | `src/main/hwpx-server.js`                     | 한컴 COM HWPX MCP 서버(HTTP) 기동/종료       |
 | `src/main/preload.js`                         | 안전한 IPC 브리지 (contextIsolation)         |
-| `src/renderer/*`                              | 채팅 UI (전송/중지 토글, 스트리밍)           |
+| `src/renderer/*`                              | 채팅(계획·승인/거절) + 데이터 탭(테이블 뷰어) |
 | `mcp-servers/hwpx_com/hwpx_mcp_server.py`     | 한컴 COM → MCP 도구(HTTP) 서버               |
-| `system-prompt.md`                            | claude 규칙(도구 사용·쓰기 후 재조회 검증)   |
+| `mcp-servers/sqlite_db/sqlite_mcp_server.py`  | SQLite → MCP 도구(stdio): db_query/insert/… |
+| `mcp-servers/sqlite_db/db_read.py`            | 대시보드용 읽기 헬퍼(메인이 호출)            |
+| `system-prompt-plan.md` / `system-prompt-execute.md` | 계획 단계(읽기·계획만) / 실행 단계(실행·검증) 규칙 |
 | `setup.ps1`                                   | 의존성 설치 + 보안모듈 등록                  |
 
 MCP 설정은 앱 실행 시 `userData/mcp.runtime.json` 으로 **자동 생성**된다

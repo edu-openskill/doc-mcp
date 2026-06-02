@@ -12,6 +12,10 @@
   <body>
     <header class="topbar">
       <div class="brand">📄 Doc MCP Desktop</div>
+      <nav class="tabs">
+        <button id="tab-chat" class="tab active">💬 채팅</button>
+        <button id="tab-data" class="tab">🗄 데이터</button>
+      </nav>
       <div class="controls">
         <button id="btn-dir" class="btn">📁 문서 폴더</button>
         <span id="dir-label" class="dir-label" title="">—</span>
@@ -25,18 +29,36 @@
       <div class="hint">
         한글(.hwpx) · 엑셀(.xlsx) · 워드(.docx) 문서가 든 폴더를 선택하고,
         무엇을 할지 적어보세요.<br />
-        예: <code>매출.xlsx 1분기 합계를 B10에 넣어줘</code> ·
-        <code>보고서.hwpx 요약해줘</code>
+        <b>먼저 계획을 보여주고, 승인하면 실행</b>합니다.<br />
+        예: <code>이 폴더 평가서들 학생명단을 DB에 모아줘</code> ·
+        <code>보고서.hwpx 14번에 홍길동</code>
       </div>
     </main>
+
+    <section id="view-data" class="view-data" hidden>
+      <div class="data-toolbar">
+        <select id="table-select" class="data-select"></select>
+        <button id="btn-refresh" class="btn">↻ 새로고침</button>
+        <input id="query-input" class="query-input"
+               placeholder="SELECT ... (직접 쿼리, Enter 실행)" />
+      </div>
+      <div id="data-grid" class="data-grid"></div>
+    </section>
+
+    <div id="approval-bar" class="approval-bar" hidden>
+      <span class="approval-label">이 계획을 실행할까요?</span>
+      <button id="btn-approve" class="btn approve">✓ 승인 · 실행</button>
+      <button id="btn-reject" class="btn reject">✗ 거절</button>
+      <span class="approval-hint">거절 시 입력창에 수정사항을 적으면 반영해 다시 계획합니다.</span>
+    </div>
 
     <footer class="composer">
       <textarea
         id="input"
         rows="2"
-        placeholder="메시지를 입력하세요 (Enter 전송 / Shift+Enter 줄바꿈)"
+        placeholder="무엇을 할지 입력하세요. 먼저 계획을 보여주고, 승인하면 실행합니다. (Enter 전송)"
       ></textarea>
-      <button id="btn-send" class="btn primary">전송</button>
+      <button id="btn-send" class="btn primary">계획</button>
     </footer>
 
     <script src="renderer.js"></script>
